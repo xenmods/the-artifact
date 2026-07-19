@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useCallback } from 'react'
 import * as THREE from 'three'
-import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls'
+import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js'
 import { PathTracer } from '../game/PathTracer'
 import { useGameStore } from '../store/gameStore'
 import type { ArtifactState } from '../store/gameStore'
