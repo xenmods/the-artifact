@@ -60,7 +60,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     set((state) => ({ settings: { ...state.settings, ...newSettings } })),
 
   artifact: {
-    ring1Angle: 120, // Scrambled initial state
+    ring1Angle: 135, // Scrambled initial state
     ring2Angle: 45,
     ring3Angle: -90,
   },

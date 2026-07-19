@@ -146,7 +146,11 @@ export function GameView() {
         const state = useGameStore.getState()
         const angle = state.artifact[`ring${ringId}Angle` as keyof ArtifactState] as number
         // Scroll down increases angle, scroll up decreases
-        setRingAngle(ringId, angle + Math.sign(e.deltaY) * 15)
+        // Snap to exactly 45 degrees for that chunky mechanical feel
+        let currentAngle = angle
+        const step = 45
+        currentAngle = Math.round(currentAngle / step) * step
+        setRingAngle(ringId, currentAngle + Math.sign(e.deltaY) * step)
         pt.updateGeometry(0)
       }
     }
