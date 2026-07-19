@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
 export type Screen = 'menu' | 'game'
 
@@ -8,11 +9,16 @@ export interface ArtifactState {
   ring3Angle: number
 }
 
+export type TimeOfDay = 'dawn' | 'noon' | 'evening' | 'night'
+
 export interface GraphicsSettings {
   renderScale: number
   samplesWhileMoving: number
   samplesWhileStill: number
   bounces: number
+  timeOfDay: TimeOfDay
+  masterVolume: number
+  denoiserEnabled: boolean
 }
 
 interface GameState {
@@ -38,62 +44,73 @@ interface GameState {
   checkSolved: () => void
 }
 
-export const useGameStore = create<GameState>((set, get) => ({
-  screen: 'menu',
-  setScreen: (screen) => set({ screen }),
+export const useGameStore = create<GameState>()(
+  persist(
+    (set, get) => ({
+      screen: 'menu',
+      setScreen: (screen) => set({ screen }),
 
-  isLoading: true,
-  setIsLoading: (loading) => set({ isLoading: loading }),
-  loadingProgress: 0,
-  setLoadingProgress: (progress) => set({ loadingProgress: progress }),
+      isLoading: true,
+      setIsLoading: (loading) => set({ isLoading: loading }),
+      loadingProgress: 0,
+      setLoadingProgress: (progress) => set({ loadingProgress: progress }),
 
-  hasPlayed: false,
-  setHasPlayed: (played) => set({ hasPlayed: played }),
+      hasPlayed: false,
+      setHasPlayed: (played) => set({ hasPlayed: played }),
 
-  settings: {
-    renderScale: 1.5,
-    samplesWhileMoving: 4,
-    samplesWhileStill: 24,
-    bounces: 3,
-  },
-  updateSettings: (newSettings) => 
-    set((state) => ({ settings: { ...state.settings, ...newSettings } })),
-
-  artifact: {
-    ring1Angle: 135, // Scrambled initial state
-    ring2Angle: 45,
-    ring3Angle: -90,
-  },
-
-  setRingAngle: (ring, angle) => {
-    set((state) => ({
-      artifact: {
-        ...state.artifact,
-        [`ring${ring}Angle`]: angle,
+      settings: {
+        renderScale: 1.5,
+        samplesWhileMoving: 4,
+        samplesWhileStill: 24,
+        bounces: 3,
+        timeOfDay: 'noon',
+        masterVolume: 0.5,
+        denoiserEnabled: true,
       },
-    }))
-    get().checkSolved()
-  },
+      updateSettings: (newSettings) => 
+        set((state) => ({ settings: { ...state.settings, ...newSettings } })),
 
-  isSolved: false,
-  checkSolved: () => {
-    const { artifact } = get()
-    // Win condition: All rings aligned at 90 degrees (facing camera)
-    const tol = 10
-    const normalize = (a: number) => ((a % 360) + 360) % 360
-    const r1 = normalize(artifact.ring1Angle)
-    const r2 = normalize(artifact.ring2Angle)
-    const r3 = normalize(artifact.ring3Angle)
+      artifact: {
+        ring1Angle: 0,
+        ring2Angle: 45,
+        ring3Angle: 120,
+      },
 
-    const isClose = (val: number, target: number) => {
-      const diff = Math.abs(val - target)
-      return diff < tol || Math.abs(diff - 360) < tol
+      setRingAngle: (ring, angle) => {
+        set((state) => ({
+          artifact: {
+            ...state.artifact,
+            [`ring${ring}Angle`]: angle,
+          },
+        }))
+        get().checkSolved()
+      },
+
+      isSolved: false,
+      checkSolved: () => {
+        const { artifact } = get()
+        // Win condition: All rings aligned at 90 degrees (facing camera)
+        const tol = 10
+        const normalize = (a: number) => ((a % 360) + 360) % 360
+        const r1 = normalize(artifact.ring1Angle)
+        const r2 = normalize(artifact.ring2Angle)
+        const r3 = normalize(artifact.ring3Angle)
+
+        const isClose = (val: number, target: number) => {
+          const diff = Math.abs(val - target)
+          return diff < tol || Math.abs(diff - 360) < tol
+        }
+
+        if (isClose(r1, 90) && isClose(r2, 90) && isClose(r3, 90)) {
+          if (!get().isSolved) set({ isSolved: true })
+        } else {
+          if (get().isSolved) set({ isSolved: false })
+        }
+      }
+    }),
+    {
+      name: 'pathtracing-settings',
+      partialize: (state) => ({ settings: state.settings, hasPlayed: state.hasPlayed }),
     }
-
-    if (isClose(r1, 90) && isClose(r2, 90) && isClose(r3, 90)) {
-      if (!get().isSolved) set({ isSolved: true })
-    } else {
-      if (get().isSolved) set({ isSolved: false })
-    }
-  },
-}))
+  )
+)

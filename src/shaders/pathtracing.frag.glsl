@@ -15,6 +15,7 @@ uniform float uULen;
 uniform float uVLen;
 uniform bool uCameraIsMoving;
 uniform int uSamplesPerFrame;
+uniform float uWalkPhase;
 
 // Textures - Wood
 uniform sampler2D tWoodColor;
@@ -101,6 +102,25 @@ vec3 getNormalFromMap(vec3 mappedNormal, vec3 hn) {
     return normalize(tbn * (mappedNormal * 2.0 - 1.0));
 }
 
+vec3 importanceSampleGGX(vec2 Xi, vec3 N, float roughness) {
+    float a = roughness * roughness;
+    float phi = 2.0 * PI * Xi.x;
+    float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a*a - 1.0) * Xi.y));
+    float sinTheta = sqrt(1.0 - cosTheta*cosTheta);
+    
+    vec3 H;
+    H.x = cos(phi) * sinTheta;
+    H.y = sin(phi) * sinTheta;
+    H.z = cosTheta;
+    
+    vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+    
+    vec3 sampleVec = tangent * H.x + bitangent * H.y + N * H.z;
+    return normalize(sampleVec);
+}
+
 float D_GGX(float NdotH, float roughness) {
     float a = roughness*roughness; float a2 = a*a; float NdotH2 = NdotH*NdotH;
     float nom = a2; float denom = (NdotH2 * (a2 - 1.0) + 1.0); denom = PI * denom * denom;
@@ -128,19 +148,24 @@ vec3 evaluateMaterial(vec3 rd, vec3 hn, vec3 albedo, float rough, float metal, o
     float specChance = max(F.x, max(F.y, F.z));
     
     if (rand() < specChance) {
-        vec3 refl = reflect(rd, hn);
-        vec3 ro = cosWeightedDir(hn) * rough;
-        newDir = normalize(mix(refl, ro, rough*rough));
+        vec2 Xi = vec2(rand(), rand());
+        vec3 H = importanceSampleGGX(Xi, hn, rough);
+        newDir = reflect(rd, H);
         
-        vec3 H = normalize(viewDir + newDir);
         float NdotL = max(dot(hn, newDir), 0.0);
         float NdotH = max(dot(hn, H), 0.0);
+        float VdotH = max(dot(viewDir, H), 0.0);
         
-        float NDF = D_GGX(NdotH, rough);   
-        float G   = GeometrySmith(NdotV, NdotL, rough);      
-        vec3 nominator = NDF * G * F;
-        float denominator = 4.0 * NdotV * NdotL + 0.001;
-        return (nominator / denominator);
+        if (NdotL > 0.0) {
+            float G = GeometrySmith(NdotV, NdotL, rough);
+            // The mathematically exact weight (BRDF * cosTheta / PDF)
+            // Weight = (F * G * VdotH) / (NdotV * NdotH)
+            vec3 weight = (F * G * VdotH) / max(NdotV * NdotH, 0.001);
+            return weight;
+        } else {
+            absorbed = true;
+            return vec3(0);
+        }
     } else {
         newDir = cosWeightedDir(hn);
         vec3 kD = (vec3(1.0) - F) * (1.0 - metal);
@@ -226,6 +251,71 @@ float sphereIntersect(float r, vec3 pos, vec3 ro, vec3 rd) {
     return t0 > 0.0 ? t0 : (t1 > 0.0 ? t1 : INFINITY);
 }
 
+float mannequinIntersect(vec3 ro, vec3 rd, out vec3 n) {
+    float t = INFINITY;
+    float d; vec3 tempN;
+    
+    vec3 camPos = uCameraMatrix[3].xyz;
+    vec3 yAxis = vec3(0.0, 1.0, 0.0);
+    
+    // Animate walk offsets based on uWalkPhase
+    float swing = sin(uWalkPhase) * 2.5; // Amount of forward/backward limb swing
+    float swingUpper = swing * 0.5;
+    float swingLower = swing * 1.0;
+    float bodyBob = abs(sin(uWalkPhase)) * 0.3; // Slight up/down bounce
+    
+    camPos.y += bodyBob;
+    
+    // Head (box, 2.5 x 3 x 2)
+    vec3 headCenter = camPos - vec3(0.0, 1.5, 0.0);
+    d = boxIntersect(headCenter - vec3(1.25, 1.5, 1.0), headCenter + vec3(1.25, 1.5, 1.0), ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    // Neck (thin cylinder)
+    d = cylIntersect(camPos - vec3(0.0, 3.5, 0.0), yAxis, 0.6, 2.0, ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    // Torso upper (broad box, 5 x 4 x 2.5)
+    vec3 torsoUpper = camPos - vec3(0.0, 6.5, 0.0);
+    d = boxIntersect(torsoUpper - vec3(2.5, 2.0, 1.25), torsoUpper + vec3(2.5, 2.0, 1.25), ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    // Torso lower / waist (narrower box, 3.5 x 3 x 2)
+    vec3 torsoLower = camPos - vec3(0.0, 10.0, 0.0);
+    d = boxIntersect(torsoLower - vec3(1.75, 1.5, 1.0), torsoLower + vec3(1.75, 1.5, 1.0), ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    // LEFT ARM (swings opposite to walkPhase, so -swing)
+    d = cylIntersect(camPos - vec3(3.5, 6.5, swingUpper), yAxis, 0.9, 4.0, ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    d = cylIntersect(camPos - vec3(3.5, 10.5, swingLower), yAxis, 0.7, 4.0, ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    // RIGHT ARM (swings with walkPhase, so +swing)
+    d = cylIntersect(camPos - vec3(-3.5, 6.5, -swingUpper), yAxis, 0.9, 4.0, ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    d = cylIntersect(camPos - vec3(-3.5, 10.5, -swingLower), yAxis, 0.7, 4.0, ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    // LEFT LEG (swings with walkPhase, opposite to left arm)
+    d = cylIntersect(camPos - vec3(1.2, 13.0, -swingUpper), yAxis, 1.1, 5.0, ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    d = cylIntersect(camPos - vec3(1.2, 17.5, -swingLower), yAxis, 0.8, 4.0, ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    // RIGHT LEG (swings opposite to walkPhase, opposite to right arm)
+    d = cylIntersect(camPos - vec3(-1.2, 13.0, swingUpper), yAxis, 1.1, 5.0, ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    d = cylIntersect(camPos - vec3(-1.2, 17.5, swingLower), yAxis, 0.8, 4.0, ro, rd, tempN);
+    if (d < t) { t = d; n = tempN; }
+    
+    return t;
+}
+
 // ============ SCENE ============
 
 void getPBRProps(int mat, vec2 uv, vec3 hp, vec3 hn, out vec3 albedo, out vec3 normal, out float rough, out float metal) {
@@ -308,30 +398,20 @@ float sceneIntersect(bool isPrimaryRay) {
         }
     }
     
-    // Player Body (Cylinder beneath camera, stopping 1 unit below the eye to prevent clipping)
+    // ====== Player Mannequin Body ======
+    // Built from multiple primitives for a recognizable human shadow.
+    // Only visible to bounce rays (isPrimaryRay hides the body from the camera).
     if (!isPrimaryRay) {
-        vec3 camPos = uCameraMatrix[3].xyz;
-        d = cylIntersect(camPos - vec3(0.0, 8.0, 0.0), vec3(0.0, 1.0, 0.0), 1.5, 14.0, rayOrigin, rayDirection, n);
-        if (d < t) { t = d; hitNormal = n; hitMatType = MAT_WOOD; hitEmission = vec3(0); }
+        d = mannequinIntersect(rayOrigin, rayDirection, n);
+        if (d < t) {
+            t = d; hitNormal = n; hitMatType = MAT_CONCRETE; hitEmission = vec3(0); hitUV = vec2(0);
+        }
     }
 
     return t;
 }
 
-float shadowIntersect(vec3 ro, vec3 rd, float maxT) {
-    float t = INFINITY; vec3 n;
-    for (int i=0; i<32; i++) {
-        if (i >= uNumBoxes) break;
-        float d = boxIntersect(uBoxMins[i], uBoxMaxs[i], ro, rd, n);
-        if (d < t) t = d;
-    }
-    for (int i=0; i<32; i++) {
-        if (i >= uNumCylinders) break;
-        float d = cylIntersect(uCylPos[i], uCylAxis[i], uCylRadii[i], uCylHeights[i], ro, rd, n);
-        if (d < t) t = d;
-    }
-    return t < maxT ? t : INFINITY;
-}
+// shadowIntersect removed because NEE has a customized loop
 
 vec3 pathTrace() {
     vec3 accum = vec3(0);
@@ -342,11 +422,12 @@ vec3 pathTrace() {
         
         float t = sceneIntersect(bounce == 0);
         if (t == INFINITY) { 
-            // Warm hazy afternoon sunset sky
-            vec3 sunDir = normalize(vec3(0.5, 0.4, -1.0));
+            // Dynamic Time-of-Day Sky
+            vec3 sunDir = normalize(uLightPos);
             float skyIntensity = max(dot(rayDirection, sunDir), 0.0);
-            skyIntensity = pow(skyIntensity, 32.0) * 100.0; 
-            vec3 skyColor = mix(vec3(0.8, 0.5, 0.3), vec3(1.0, 0.9, 0.7), skyIntensity);
+            skyIntensity = pow(skyIntensity, 32.0) * uLightRadius * 4.0; 
+            // Mix horizon color with sun color
+            vec3 skyColor = mix(uLightColor * 0.4, uLightColor, skyIntensity);
             accum += throughput * skyColor;
             break; 
         }
@@ -373,7 +454,7 @@ vec3 pathTrace() {
         vec3 materialColor = evaluateMaterial(rayDirection, mappedNormal, albedo, rough, metal, newDir, absorbed);
         
         // --- NEXT EVENT ESTIMATION (DIRECT SUNLIGHT) ---
-        vec3 sunDir = normalize(vec3(0.5, 0.4, -1.0)); // Sun high and to the right
+        vec3 sunDir = normalize(uLightPos);
         if (rough > 0.1) {
             float st = INFINITY; vec3 sn;
             vec3 srO = hp + mappedNormal * uEPS_intersect;
@@ -402,14 +483,14 @@ vec3 pathTrace() {
                 if (cd < st) st = cd;
             }
             
-            // Player Body Shadow
-            float pcd = cylIntersect(uCameraMatrix[3].xyz - vec3(0.0, 8.0, 0.0), vec3(0.0, 1.0, 0.0), 1.5, 14.0, srO, srD, sn);
+            // Player Mannequin Shadow
+            float pcd = mannequinIntersect(srO, srD, sn);
             if (pcd < st) st = pcd;
             
             if (st == INFINITY) {
                 float NdotL = max(dot(mappedNormal, sunDir), 0.0);
                 vec3 brdf = albedo / 3.14159;
-                accum += throughput * brdf * NdotL * vec3(1.0, 0.85, 0.5) * 50.0;
+                accum += throughput * brdf * NdotL * (uLightColor * uLightRadius * 0.75);
             }
         }
         
@@ -438,16 +519,19 @@ void main() {
     for (int s = 0; s < 32; s++) {
         if (s >= uSamplesPerFrame) break;
         
-        vec2 ndc = vUv * 2.0 - 1.0; 
+        // Subpixel jitter for perfect anti-aliasing
+        vec2 jitter = (vec2(rand(), rand()) - 0.5) / uResolution;
+        vec2 jitteredUV = vUv + jitter;
+        
+        vec2 ndc = jitteredUV * 2.0 - 1.0; 
         ndc.x *= uResolution.x / uResolution.y;
-        ndc += (vec2(rand(), rand()) - 0.5) / uResolution;
         
         vec3 rd = normalize(vec3(ndc.x * uULen, ndc.y * uVLen, -1.0));
         rayOrigin = (uCameraMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
         rayDirection = normalize((uCameraMatrix * vec4(rd, 0.0)).xyz);
         
         vec3 color = pathTrace();
-        color = min(color, vec3(10.0)); // Prevent fireflies from exploding
+        color = min(color, vec3(50.0)); // Prevent massive fireflies without crushing bright lights
         totalColor += color;
     }
     

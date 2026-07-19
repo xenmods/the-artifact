@@ -2,9 +2,11 @@ import * as THREE from 'three'
 import pathtracingVertSrc from '../shaders/pathtracing.vert.glsl'
 import pathtracingFragSrc from '../shaders/pathtracing.frag.glsl'
 import { useGameStore } from '../store/gameStore'
+import type { TimeOfDay } from '../store/gameStore'
 import { ArtifactBuilder } from './ArtifactBuilder'
 import screencopyFragSrc from '../shaders/screencopy.frag.glsl'
 import screenoutputFragSrc from '../shaders/screenoutput.frag.glsl'
+import denoiseFragSrc from '../shaders/denoise.frag.glsl'
 
 export interface ArtifactUniforms {
   numBoxes: number
@@ -38,12 +40,18 @@ export class PathTracer {
   private screenCopyQuad!: THREE.Mesh
   private screenOutputQuad!: THREE.Mesh
 
+  private denoiseRenderTarget!: THREE.WebGLRenderTarget
+  private denoiseMaterial!: THREE.ShaderMaterial
+  private denoiseScene!: THREE.Scene
+  private denoiseQuad!: THREE.Mesh
+
   private sampleCounter = 1.0
   private frameCounter = 0.0
   private sceneIsDynamic = false
   private animationId = 0
   private width = 0
   private height = 0
+  private prevTimeOfDay = 'noon'
 
   private prevCameraMatrix = new THREE.Matrix4()
   private viewCamera: THREE.PerspectiveCamera
@@ -99,6 +107,7 @@ export class PathTracer {
 
     this.renderTargetA = new THREE.WebGLRenderTarget(rtW, rtH, opts)
     this.renderTargetB = new THREE.WebGLRenderTarget(rtW, rtH, opts)
+    this.denoiseRenderTarget = new THREE.WebGLRenderTarget(rtW, rtH, opts)
   }
 
   private padVec3(arr: THREE.Vector3[], size: number): THREE.Vector3[] {
@@ -138,6 +147,7 @@ export class PathTracer {
         uVLen: { value: uVLen },
         uCameraIsMoving: { value: false },
         uSamplesPerFrame: { value: 2 },
+        uWalkPhase: { value: 0.0 },
 
         // Textures placeholder
         tWoodColor: { value: null }, tWoodNormal: { value: null }, tWoodRoughness: { value: null },
@@ -182,8 +192,18 @@ export class PathTracer {
       fragmentShader: screenoutputFragSrc,
       uniforms: {
         tTexture: { value: this.renderTargetB.texture },
-        uToneMappingExposure: { value: 1.5 }, // Increased for moody lighting
+        uToneMappingExposure: { value: 2.5 }, // Increased for brighter room
         uPixelEdgeSharpness: { value: 0.5 },
+        uResolution: { value: new THREE.Vector2(this.width, this.height) },
+      },
+      depthTest: false, depthWrite: false, glslVersion: THREE.GLSL3,
+    })
+
+    this.denoiseMaterial = new THREE.ShaderMaterial({
+      vertexShader: pathtracingVertSrc,
+      fragmentShader: denoiseFragSrc,
+      uniforms: {
+        tInput: { value: this.renderTargetB.texture },
         uResolution: { value: new THREE.Vector2(this.width, this.height) },
       },
       depthTest: false, depthWrite: false, glslVersion: THREE.GLSL3,
@@ -228,6 +248,12 @@ export class PathTracer {
     this.pathTracingMaterial.uniforms.tConcreteRoughness.value = loadTex('/textures/wood051/Wood051_1K-JPG_Roughness.jpg')
   }
 
+  public setWalkPhase(phase: number) {
+    if (this.pathTracingMaterial) {
+      this.pathTracingMaterial.uniforms.uWalkPhase.value = phase
+    }
+  }
+
   public updateGeometry(unlockProgress: number = 0) {
     const state = useGameStore.getState().artifact
     const sceneData = ArtifactBuilder.build(state, unlockProgress)
@@ -259,6 +285,10 @@ export class PathTracer {
     this.screenOutputScene = new THREE.Scene()
     this.screenOutputQuad = new THREE.Mesh(geo, this.screenOutputMaterial)
     this.screenOutputScene.add(this.screenOutputQuad)
+
+    this.denoiseScene = new THREE.Scene()
+    this.denoiseQuad = new THREE.Mesh(geo, this.denoiseMaterial)
+    this.denoiseScene.add(this.denoiseQuad)
   }
 
   resetAccumulation() {
@@ -286,6 +316,7 @@ export class PathTracer {
     
     this.renderTargetA.setSize(rtW, rtH)
     this.renderTargetB.setSize(rtW, rtH)
+    this.denoiseRenderTarget.setSize(rtW, rtH)
 
     if (this.pathTracingMaterial) {
       this.pathTracingMaterial.uniforms.uResolution.value.set(w, h)
@@ -321,20 +352,19 @@ export class PathTracer {
       this.prevCameraMatrix.copy(this.viewCamera.matrixWorld)
     }
 
-    // Swinging lamp animation
+    // Time reference for shader
     const time = performance.now() * 0.001
-    const lx = Math.sin(time * 0.5) * 5
-    const lz = Math.cos(time * 0.7) * 3
-    this.pathTracingMaterial.uniforms.uLightPos.value.set(lx, 38, lz)
-    
-    // Always dynamic if light is moving, but for clean renders we can freeze it later
-    // For now let it accumulate slowly if we don't reset it manually, but light motion makes it noisy
-    // Actually, to get a clean render, let's freeze the light:
-    this.pathTracingMaterial.uniforms.uLightPos.value.set(20, 50, -100)
 
     this.pathTracingMaterial.uniforms.uCameraMatrix.value.copy(this.viewCamera.matrixWorld)
     
     const settings = useGameStore.getState().settings
+
+    // Time of day lighting — reset accumulation if it changed
+    if (settings.timeOfDay !== this.prevTimeOfDay) {
+      this.prevTimeOfDay = settings.timeOfDay
+      this.resetAccumulation()
+    }
+    this.applyTimeOfDay(settings.timeOfDay)
 
     if (isMoving || this.sceneIsDynamic) {
       this.pathTracingMaterial.uniforms.uCameraIsMoving.value = true
@@ -351,15 +381,32 @@ export class PathTracer {
     this.pathTracingMaterial.uniforms.uTime.value = time
     this.pathTracingMaterial.uniforms.uRandomVec2.value.set(Math.random(), Math.random())
 
+    // Pass 1: Path trace into B
     this.pathTracingMaterial.uniforms.tPreviousTexture.value = this.renderTargetA.texture
     this.renderer.setRenderTarget(this.renderTargetB)
     this.renderer.render(this.scene, this.orthoCamera)
 
+    // Pass 2: Copy B into A for accumulation
     this.screenCopyMaterial.uniforms.tTexture.value = this.renderTargetB.texture
     this.renderer.setRenderTarget(this.renderTargetA)
     this.renderer.render(this.screenCopyScene, this.orthoCamera)
 
-    this.screenOutputMaterial.uniforms.tTexture.value = this.renderTargetB.texture
+    // Pass 3 (conditional): Denoise B, or pass B directly to screen output
+    if (settings.denoiserEnabled) {
+      this.denoiseMaterial.uniforms.tInput.value = this.renderTargetB.texture
+      this.denoiseMaterial.uniforms.uResolution.value.set(
+        Math.floor(this.width / this.renderScale),
+        Math.floor(this.height / this.renderScale)
+      )
+      this.renderer.setRenderTarget(this.denoiseRenderTarget)
+      this.renderer.render(this.denoiseScene, this.orthoCamera)
+
+      this.screenOutputMaterial.uniforms.tTexture.value = this.denoiseRenderTarget.texture
+    } else {
+      this.screenOutputMaterial.uniforms.tTexture.value = this.renderTargetB.texture
+    }
+
+    // Final pass: Screen output
     this.renderer.setRenderTarget(null)
     this.renderer.render(this.screenOutputScene, this.orthoCamera)
 
@@ -375,10 +422,38 @@ export class PathTracer {
     this.stop()
     this.renderTargetA.dispose()
     this.renderTargetB.dispose()
+    this.denoiseRenderTarget.dispose()
     this.pathTracingMaterial.dispose()
     this.screenCopyMaterial.dispose()
     this.screenOutputMaterial.dispose()
+    this.denoiseMaterial.dispose()
     this.renderer.dispose()
   }
   getCamera() { return this.viewCamera }
+
+  private applyTimeOfDay(tod: TimeOfDay) {
+    const u = this.pathTracingMaterial.uniforms
+    switch (tod) {
+      case 'dawn':
+        u.uLightPos.value.set(-40, 25, -60)
+        u.uLightColor.value.set(1.0, 0.65, 0.45)
+        u.uLightRadius.value = 15
+        break
+      case 'noon':
+        u.uLightPos.value.set(20, 50, -100)
+        u.uLightColor.value.set(1.0, 0.95, 0.9)
+        u.uLightRadius.value = 16
+        break
+      case 'evening':
+        u.uLightPos.value.set(50, 15, -40)
+        u.uLightColor.value.set(1.0, 0.45, 0.15)
+        u.uLightRadius.value = 18
+        break
+      case 'night':
+        u.uLightPos.value.set(0, 55, 0)
+        u.uLightColor.value.set(0.35, 0.45, 0.75)
+        u.uLightRadius.value = 8
+        break
+    }
+  }
 }

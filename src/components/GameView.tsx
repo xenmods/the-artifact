@@ -5,6 +5,7 @@ import { PathTracer } from '../game/PathTracer'
 import { useGameStore } from '../store/gameStore'
 import type { ArtifactState } from '../store/gameStore'
 import { InteractionManager } from '../game/InteractionManager'
+import { AudioManager } from '../game/AudioManager'
 
 export function GameView() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -12,6 +13,7 @@ export function GameView() {
   const pathTracerRef = useRef<PathTracer | null>(null)
   const controlsRef = useRef<PointerLockControls | null>(null)
   const interactionManagerRef = useRef<InteractionManager | null>(null)
+  const audioRef = useRef<AudioManager | null>(null)
 
   const isSolved = useGameStore((s) => s.isSolved)
   const setScreen = useGameStore((s) => s.setScreen)
@@ -56,6 +58,10 @@ export function GameView() {
 
     interactionManagerRef.current = new InteractionManager(pt.getCamera(), canvas)
 
+    // Audio
+    const audio = new AudioManager()
+    audioRef.current = audio
+
     const handleResize = () => {
       canvas.width = container.clientWidth
       canvas.height = container.clientHeight
@@ -74,6 +80,10 @@ export function GameView() {
     let animId = 0
     let currentProgress = 0
     let targetProgress = 0
+    let lastTime = performance.now()
+    let ambientStarted = false
+    let walkPhase = 0
+    let baseCameraY = pt.getCamera().position.y
 
     const animate = () => {
       animId = requestAnimationFrame(animate)
@@ -90,6 +100,7 @@ export function GameView() {
       }
       
       // WASD movement
+      let isActuallyMoving = false
       const speed = 0.6
       const camera = pt.getCamera()
       const forward = new THREE.Vector3()
@@ -127,15 +138,41 @@ export function GameView() {
 
         const bound = 55
         let newX = Math.max(-bound, Math.min(bound, camera.position.x + move.x))
-        if (checkCollision(newX, camera.position.z)) newX = camera.position.x // Slide along Z if X is blocked
+        if (checkCollision(newX, camera.position.z)) newX = camera.position.x
         
         let newZ = Math.max(-bound, Math.min(bound, camera.position.z + move.z))
-        if (checkCollision(newX, newZ)) newZ = camera.position.z // Use newX here to check corner collision
+        if (checkCollision(newX, newZ)) newZ = camera.position.z
         
-        // Update via controls since it manages position differently
         camera.position.x = newX
         camera.position.z = newZ
+        isActuallyMoving = true
       }
+
+      // Audio: footsteps + ambient
+      const now = performance.now()
+      const dt = now - lastTime
+      lastTime = now
+      audio.updateVolume()
+      audio.updateWalking(isActuallyMoving && controls.isLocked, dt)
+      if (!ambientStarted && controls.isLocked) {
+        audio.startAmbient()
+        ambientStarted = true
+      }
+      
+      // Camera sway and walk animations
+      if (isActuallyMoving && controls.isLocked) {
+        walkPhase += dt * 0.01 // Adjust speed of walking cycle
+      } else {
+        // Smoothly return to standing pose (sin(x)=0 when x is multiple of PI)
+        const nearestPi = Math.round(walkPhase / Math.PI) * Math.PI
+        walkPhase += (nearestPi - walkPhase) * 0.1
+      }
+      
+      // Head bobbing (rolling breaks PointerLockControls)
+      camera.position.y = baseCameraY + Math.sin(walkPhase * 2) * 0.5
+      
+      // Pass phase to PathTracer for mannequin animation
+      pt.setWalkPhase(walkPhase)
     }
     animate()
 
@@ -152,6 +189,7 @@ export function GameView() {
         currentAngle = Math.round(currentAngle / step) * step
         setRingAngle(ringId, currentAngle + Math.sign(e.deltaY) * step)
         pt.updateGeometry(0)
+        audio.playClick()
       }
     }
     window.addEventListener('wheel', handleWheel)
@@ -164,6 +202,7 @@ export function GameView() {
       window.removeEventListener('wheel', handleWheel)
       cancelAnimationFrame(animId)
       controls.dispose()
+      audio.dispose()
       pt.dispose()
     }
   }, [isSolved])

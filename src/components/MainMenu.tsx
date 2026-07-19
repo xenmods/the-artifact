@@ -164,6 +164,65 @@ export function MainMenu() {
                 ))}
               </div>
             </div>
+
+            {/* Time of Day */}
+            <div className="flex justify-between items-center">
+              <div className="text-sm tracking-widest text-white/60">
+                TIME OF DAY
+              </div>
+              <div className="flex gap-2">
+                {(['dawn', 'noon', 'evening', 'night'] as const).map((val) => (
+                  <button
+                    key={val}
+                    onClick={() => updateSettings({ timeOfDay: val })}
+                    className={`px-4 py-2 text-xs tracking-widest border ${settings.timeOfDay === val ? "bg-white text-black border-white" : "bg-transparent text-white/50 border-white/20 hover:border-white/50"}`}
+                  >
+                    {val.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Denoiser */}
+            <div className="flex justify-between items-center">
+              <div className="text-sm tracking-widest text-white/60">
+                DENOISER (EXPERIMENTAL)
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => updateSettings({ denoiserEnabled: true })}
+                  className={`px-4 py-2 text-xs tracking-widest border ${settings.denoiserEnabled ? "bg-white text-black border-white" : "bg-transparent text-white/50 border-white/20 hover:border-white/50"}`}
+                >
+                  ON
+                </button>
+                <button
+                  onClick={() => updateSettings({ denoiserEnabled: false })}
+                  className={`px-4 py-2 text-xs tracking-widest border ${!settings.denoiserEnabled ? "bg-white text-black border-white" : "bg-transparent text-white/50 border-white/20 hover:border-white/50"}`}
+                >
+                  OFF
+                </button>
+              </div>
+            </div>
+
+            {/* Volume */}
+            <div className="flex justify-between items-center">
+              <div className="text-sm tracking-widest text-white/60">
+                MASTER VOLUME
+              </div>
+              <div className="flex items-center gap-4">
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={settings.masterVolume}
+                  onChange={(e) => updateSettings({ masterVolume: parseFloat(e.target.value) })}
+                  className="w-32 accent-white"
+                  style={{ accentColor: 'white' }}
+                />
+                <span className="text-xs text-white/40 w-8">{Math.round(settings.masterVolume * 100)}%</span>
+              </div>
+            </div>
           </div>
         )}
       </div>
