@@ -36,6 +36,9 @@ interface GameState {
   settings: GraphicsSettings
   updateSettings: (newSettings: Partial<GraphicsSettings>) => void
 
+  currentScene: number
+  setCurrentScene: (scene: number) => void
+
   // Artifact Rotation State
   artifact: ArtifactState
   setRingAngle: (ring: number, angle: number) => void
@@ -54,6 +57,9 @@ export const useGameStore = create<GameState>()(
       setIsLoading: (loading) => set({ isLoading: loading }),
       loadingProgress: 0,
       setLoadingProgress: (progress) => set({ loadingProgress: progress }),
+
+      currentScene: 1,
+      setCurrentScene: (scene) => set({ currentScene: scene }),
 
       hasPlayed: false,
       setHasPlayed: (played) => set({ hasPlayed: played }),

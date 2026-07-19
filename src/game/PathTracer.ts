@@ -1,6 +1,8 @@
 import * as THREE from 'three'
 import pathtracingVertSrc from '../shaders/pathtracing.vert.glsl'
 import pathtracingFragSrc from '../shaders/pathtracing.frag.glsl'
+import scene2FragSrc from '../shaders/scene_2.frag.glsl'
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js'
 import { useGameStore } from '../store/gameStore'
 import type { TimeOfDay } from '../store/gameStore'
 import { ArtifactBuilder } from './ArtifactBuilder'
@@ -57,6 +59,10 @@ export class PathTracer {
   private viewCamera: THREE.PerspectiveCamera
   
   private texturesLoaded = false
+
+  public isTakingPhoto = false
+  public onPhotoReady?: (dataUrl: string) => void
+  public onPhotoProgress?: (samples: number) => void
 
   // Downsample to increase performance drastically
   private renderScale = 1.5
@@ -175,6 +181,8 @@ export class PathTracer {
         uLightColor: { value: new THREE.Vector3(1.0, 0.85, 0.6) }, // Warm sunlight
         uLightRadius: { value: 12 },
         uMaxBounces: { value: 3 },
+        tHDRI: { value: null },
+        uUseHDRI: { value: false },
       },
       depthTest: false,
       depthWrite: false,
@@ -254,6 +262,25 @@ export class PathTracer {
     this.pathTracingMaterial.uniforms.tMarbleRoughness.value = loadTex('/textures/marble015/Marble015_1K-JPG_Roughness.jpg')
   }
 
+  public loadScene(sceneId: number) {
+    if (sceneId === 1) {
+      this.pathTracingMaterial.fragmentShader = pathtracingFragSrc
+    } else {
+      this.pathTracingMaterial.fragmentShader = scene2FragSrc
+    }
+    this.pathTracingMaterial.needsUpdate = true
+    this.resetAccumulation()
+  }
+
+  public loadHDRI(url: string) {
+    new RGBELoader().load(url, (texture) => {
+      texture.mapping = THREE.EquirectangularReflectionMapping
+      this.pathTracingMaterial.uniforms.tHDRI.value = texture
+      this.pathTracingMaterial.uniforms.uUseHDRI.value = true
+      this.resetAccumulation()
+    })
+  }
+
   public setWalkPhase(phase: number) {
     if (this.pathTracingMaterial) {
       this.pathTracingMaterial.uniforms.uWalkPhase.value = phase
@@ -300,6 +327,11 @@ export class PathTracer {
   resetAccumulation() {
     this.sampleCounter = 1.0
     this.sceneIsDynamic = true
+  }
+
+  startPhotoRender() {
+    this.isTakingPhoto = true
+    this.resetAccumulation()
   }
 
   resize() {
@@ -419,6 +451,18 @@ export class PathTracer {
     this.sampleCounter++
     if (this.sceneIsDynamic && this.sampleCounter > 2) {
       this.sceneIsDynamic = false
+    }
+
+    if (this.isTakingPhoto) {
+      if (this.onPhotoProgress) {
+        this.onPhotoProgress(this.sampleCounter)
+      }
+      if (this.sampleCounter >= 200) {
+        this.isTakingPhoto = false
+        if (this.onPhotoReady) {
+          this.onPhotoReady(this.canvas.toDataURL('image/png'))
+        }
+      }
     }
   }
 

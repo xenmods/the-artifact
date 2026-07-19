@@ -83,6 +83,37 @@ export function MainMenu() {
                     : "INITIALIZE LINK"}
               </span>
             </button>
+
+            {/* Scene Selector */}
+            {!isLoading && (
+              <div className="mt-12 flex flex-col items-center gap-4">
+                <div className="text-xs text-white/40 tracking-[0.2em] uppercase border-b border-white/10 pb-2 mb-2 w-full text-center">
+                  SELECT ENVIRONMENT
+                </div>
+                <div className="flex gap-4">
+                  <button 
+                    onClick={() => useGameStore.getState().setCurrentScene(1)}
+                    className={`px-4 py-2 text-xs tracking-widest border transition-all ${
+                      useGameStore.getState().currentScene === 1 
+                        ? 'border-[rgba(0,255,150,0.5)] text-[rgba(0,255,150,1)] bg-[rgba(0,255,150,0.1)]' 
+                        : 'border-white/20 text-white/50 hover:border-white/50 hover:text-white/80'
+                    }`}
+                  >
+                    SCENE 1: INTERROGATION
+                  </button>
+                  <button 
+                    onClick={() => useGameStore.getState().setCurrentScene(2)}
+                    className={`px-4 py-2 text-xs tracking-widest border transition-all ${
+                      useGameStore.getState().currentScene === 2
+                        ? 'border-[rgba(0,255,150,0.5)] text-[rgba(0,255,150,1)] bg-[rgba(0,255,150,0.1)]' 
+                        : 'border-white/20 text-white/50 hover:border-white/50 hover:text-white/80'
+                    }`}
+                  >
+                    SCENE 2: LIVING ROOM
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <div

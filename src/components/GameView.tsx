@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from 'react'
+import React, { useEffect, useRef, useCallback, useState } from 'react'
 import * as THREE from 'three'
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js'
 import { PathTracer } from '../game/PathTracer'
@@ -22,6 +22,8 @@ export function GameView() {
   // Dragging state
   const draggingRing = useRef<number | null>(null)
   const previousMouseX = useRef(0)
+  
+  const [photoProgress, setPhotoProgress] = useState(0)
 
   // Initialize path tracer & controls
   useEffect(() => {
@@ -35,14 +37,40 @@ export function GameView() {
     const pt = new PathTracer(canvas)
     pathTracerRef.current = pt
     pt.start()
+    
+    // Load initial scene
+    const initialState = useGameStore.getState()
+    pt.loadScene(initialState.currentScene)
+    
+    // Attempt to load HDRI
+    pt.loadHDRI('/textures/skybox.hdr')
+
+    // Subscribe to scene changes to hot-swap shaders
+    const unsub = useGameStore.subscribe((state, prevState) => {
+      if (state.currentScene !== prevState.currentScene) {
+        pt.loadScene(state.currentScene)
+        setSpawnForScene(state.currentScene)
+      }
+    })
+
     pt.updateGeometry(0)
 
     // Setup PointerLockControls
     const camera = pt.getCamera()
-    camera.position.set(45, 15, 45) // Spawn in back right corner
-    camera.lookAt(0, 15, 0) // Look at artifact table
     const controls = new PointerLockControls(camera, document.body)
     controlsRef.current = controls
+
+    // Spawn logic
+    const setSpawnForScene = (sceneId: number) => {
+      if (sceneId === 1) {
+        camera.position.set(45, 15, 45) // Interrogation Room
+        camera.lookAt(0, 15, 0)
+      } else {
+        camera.position.set(0, 15, 25) // Living Room
+        camera.lookAt(0, 15, -10)
+      }
+    }
+    setSpawnForScene(initialState.currentScene)
 
     // Click canvas to lock pointer
     const handleCanvasClick = () => {
@@ -70,8 +98,25 @@ export function GameView() {
     window.addEventListener('resize', handleResize)
 
     // WASD Keys
+    let isRenderingPhoto = false
     const keys = new Set<string>()
-    const handleKeyDown = (e: KeyboardEvent) => keys.add(e.key.toLowerCase())
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const key = e.key.toLowerCase()
+      keys.add(key)
+      if (key === 'r' && !isRenderingPhoto) {
+        isRenderingPhoto = true
+        pt.onPhotoProgress = (samples) => setPhotoProgress(samples)
+        pt.onPhotoReady = (dataUrl) => {
+          isRenderingPhoto = false
+          setPhotoProgress(0)
+          const a = document.createElement('a')
+          a.href = dataUrl
+          a.download = 'pathtraced_screenshot.png'
+          a.click()
+        }
+        pt.startPhotoRender()
+      }
+    }
     const handleKeyUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase())
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('keyup', handleKeyUp)
@@ -117,34 +162,46 @@ export function GameView() {
       if (keys.has('a') || keys.has('arrowleft')) move.add(right)
       if (keys.has('d') || keys.has('arrowright')) move.sub(right)
       
-      if (move.lengthSq() > 0 && controls.isLocked) {
+      if (move.lengthSq() > 0 && controls.isLocked && !isRenderingPhoto) {
         move.normalize().multiplyScalar(speed)
         
         // Player Collision Radius
         const r = 2.5
         
+        const currentScene = useGameStore.getState().currentScene
+        
         const checkCollision = (nx: number, nz: number) => {
-          // 1. Table: X [-25, 25], Z [-15, 15]
-          if (nx > -25 - r && nx < 25 + r && nz > -15 - r && nz < 15 + r) return true
-          // 2. Player Chair: X [-6, 6], Z [18, 26]
-          if (nx > -6 - r && nx < 6 + r && nz > 18 - r && nz < 26 + r) return true
-          // 3. Suspect Chair: X [-5, 5], Z [-35, -25]
-          if (nx > -5 - r && nx < 5 + r && nz > -35 - r && nz < -25 + r) return true
-          // 4. Server Rack: X [-60, -45], Z [-20, 20]
-          if (nx > -60 - r && nx < -45 + r && nz > -20 - r && nz < 20 + r) return true
-          
+          if (currentScene === 1) {
+            // 1. Table: X [-25, 25], Z [-15, 15]
+            if (nx > -25 - r && nx < 25 + r && nz > -15 - r && nz < 15 + r) return true
+            // 2. Player Chair: X [-6, 6], Z [18, 26]
+            if (nx > -6 - r && nx < 6 + r && nz > 18 - r && nz < 26 + r) return true
+            // 3. Suspect Chair: X [-5, 5], Z [-35, -25]
+            if (nx > -5 - r && nx < 5 + r && nz > -35 - r && nz < -25 + r) return true
+            // 4. Server Rack: X [-60, -45], Z [-20, 20]
+            if (nx > -60 - r && nx < -45 + r && nz > -20 - r && nz < 20 + r) return true
+          } else if (currentScene === 2) {
+            // 1. Couch: X [-15, 15], Z [-20, 0]
+            if (nx > -15 - r && nx < 15 + r && nz > -20 - r && nz < 0 + r) return true
+            // 2. Coffee Table: X [-5, 5], Z [-18, -10]
+            if (nx > -5 - r && nx < 5 + r && nz > -18 - r && nz < -10 + r) return true
+            // 3. TV Stand: X [-5, 25], Z [-38, -34]
+            if (nx > -5 - r && nx < 25 + r && nz > -38 - r && nz < -34 + r) return true
+          }
           return false
         }
 
-        const bound = 55
-        let newX = Math.max(-bound, Math.min(bound, camera.position.x + move.x))
+        const bounds = currentScene === 1 ? 58 : 38
+        
+        let newX = Math.max(-bounds, Math.min(bounds, camera.position.x + move.x))
         if (checkCollision(newX, camera.position.z)) newX = camera.position.x
         
-        let newZ = Math.max(-bound, Math.min(bound, camera.position.z + move.z))
+        let newZ = Math.max(-bounds, Math.min(bounds, camera.position.z + move.z))
         if (checkCollision(newX, newZ)) newZ = camera.position.z
         
         camera.position.x = newX
         camera.position.z = newZ
+        
         isActuallyMoving = true
       }
 
@@ -177,7 +234,7 @@ export function GameView() {
     animate()
 
     const handleWheel = (e: WheelEvent) => {
-      if (!controls.isLocked || isSolved) return
+      if (!controls.isLocked || isSolved || isRenderingPhoto) return
       const ringId = interactionManagerRef.current?.getIntersectedRing()
       if (ringId !== undefined && ringId !== null) {
         const state = useGameStore.getState()
@@ -195,12 +252,13 @@ export function GameView() {
     window.addEventListener('wheel', handleWheel)
 
     return () => {
+      unsub()
+      cancelAnimationFrame(animId)
       canvas.removeEventListener('click', handleCanvasClick)
       window.removeEventListener('resize', handleResize)
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
       window.removeEventListener('wheel', handleWheel)
-      cancelAnimationFrame(animId)
       controls.dispose()
       audio.dispose()
       pt.dispose()
@@ -213,6 +271,22 @@ export function GameView() {
       
       {/* Central Crosshair */}
       <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-white rounded-full mix-blend-difference -translate-x-1/2 -translate-y-1/2 pointer-events-none z-10 opacity-70" />
+
+      {/* Photo Render Overlay */}
+      {photoProgress > 0 && (
+        <div className="absolute top-10 left-1/2 -translate-x-1/2 px-6 py-3 bg-black/80 backdrop-blur-md rounded-lg text-white font-mono text-xl z-20 shadow-[0_0_15px_rgba(0,255,150,0.3)] border border-[rgba(0,255,150,0.2)]">
+          <div className="text-sm text-gray-400 mb-1 tracking-widest uppercase">Rendering Photo</div>
+          <div className="flex items-center gap-4">
+            <div className="w-48 h-2 bg-gray-800 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-[rgba(0,255,150,0.8)] shadow-[0_0_10px_rgba(0,255,150,0.8)] transition-all duration-75"
+                style={{ width: `${(photoProgress / 200) * 100}%` }}
+              />
+            </div>
+            <span>{Math.min(200, Math.floor(photoProgress))} / 200</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
