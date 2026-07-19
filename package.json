@@ -1,0 +1,30 @@
+{
+  "name": "path-tracing-game",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/unzip-stream": "^0.3.4",
+    "@vitejs/plugin-react": "^6.0.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6.0.2",
+    "unzip-stream": "^0.3.4",
+    "vite": "^8.1.1"
+  },
+  "dependencies": {
+    "@types/three": "^0.185.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "three": "^0.185.1",
+    "vite-plugin-glsl": "^1.6.0",
+    "zustand": "^5.0.14"
+  }
+}
