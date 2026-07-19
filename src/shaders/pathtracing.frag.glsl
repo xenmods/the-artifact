@@ -17,21 +17,13 @@ uniform bool uCameraIsMoving;
 uniform int uSamplesPerFrame;
 uniform float uWalkPhase;
 
-// Textures - Wood
-uniform sampler2D tWoodColor;
-uniform sampler2D tWoodNormal;
-uniform sampler2D tWoodRoughness;
-// Textures - Metal
-uniform sampler2D tMetalColor;
-uniform sampler2D tMetalNormal;
-uniform sampler2D tMetalRoughness;
-// Textures - Concrete
-uniform sampler2D tConcreteColor;
-uniform sampler2D tConcreteNormal;
-uniform sampler2D tConcreteRoughness;
+// Textures placeholder
+uniform sampler2D tWoodColor; uniform sampler2D tWoodNormal; uniform sampler2D tWoodRoughness;
+uniform sampler2D tMetalColor; uniform sampler2D tMetalNormal; uniform sampler2D tMetalRoughness;
+uniform sampler2D tConcreteColor; uniform sampler2D tConcreteNormal; uniform sampler2D tConcreteRoughness;
+uniform sampler2D tMarbleColor; uniform sampler2D tMarbleNormal; uniform sampler2D tMarbleRoughness;
 
-
-// Artifact objects
+// Artifact arraysobjects
 uniform int uNumBoxes;
 uniform vec3 uBoxMins[32];
 uniform vec3 uBoxMaxs[32];
@@ -68,6 +60,7 @@ const int MAT_METAL = 2;
 const int MAT_CONCRETE = 3;
 const int MAT_GOLD = 4;
 const int MAT_GEM = 5;
+const int MAT_MARBLE = 6;
 
 // ============ GLOBAL STATE ============
 vec3 rayOrigin, rayDirection;
@@ -169,7 +162,9 @@ vec3 evaluateMaterial(vec3 rd, vec3 hn, vec3 albedo, float rough, float metal, o
     } else {
         newDir = cosWeightedDir(hn);
         vec3 kD = (vec3(1.0) - F) * (1.0 - metal);
-        return (albedo / PI) * kD;
+        // BRDF is (albedo/PI), PDF is (cosTheta/PI). 
+        // Weight = BRDF * cosTheta / PDF = albedo
+        return albedo * kD;
     }
 }
 
@@ -347,6 +342,12 @@ void getPBRProps(int mat, vec2 uv, vec3 hp, vec3 hn, out vec3 albedo, out vec3 n
         rough = 0.05;
         metal = 0.0;
         normal = hn;
+    } else if (mat == MAT_MARBLE) {
+        albedo = texture(tMarbleColor, uv).rgb;
+        rough = texture(tMarbleRoughness, uv).r;
+        metal = 0.0;
+        vec3 nm = texture(tMarbleNormal, uv).rgb;
+        normal = getNormalFromMap(nm, hn);
     } else {
         albedo = vec3(1); rough = 0.5; metal = 0.0; normal = hn;
     }
@@ -369,9 +370,14 @@ float sceneIntersect(bool isPrimaryRay) {
         bool isWindow = (hn.z > 0.5 && hp.x > -25.0 && hp.x < 25.0 && hp.y > 15.0 && hp.y < 45.0);
         
         if (!isWindow) {
-            t = tFar; hitNormal = hn;
-            hitMatType = MAT_CONCRETE; hitEmission = vec3(0); hitUV = hp.xz * 0.05;
-            if (abs(hitNormal.y) < 0.5) hitUV = hp.xy * 0.05;
+            t = tFar; hitNormal = hn; hitEmission = vec3(0);
+            if (hn.y > 0.5) {
+                hitMatType = MAT_MARBLE;
+                hitUV = hp.xz * 0.05;
+            } else {
+                hitMatType = MAT_CONCRETE;
+                hitUV = (abs(hitNormal.y) < 0.5) ? hp.xy * 0.05 : hp.xz * 0.05;
+            }
         }
     }
 

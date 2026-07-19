@@ -153,6 +153,7 @@ export class PathTracer {
         tWoodColor: { value: null }, tWoodNormal: { value: null }, tWoodRoughness: { value: null },
         tMetalColor: { value: null }, tMetalNormal: { value: null }, tMetalRoughness: { value: null },
         tConcreteColor: { value: null }, tConcreteNormal: { value: null }, tConcreteRoughness: { value: null },
+        tMarbleColor: { value: null }, tMarbleNormal: { value: null }, tMarbleRoughness: { value: null },
 
         // Artifact arrays
         uNumBoxes: { value: 0 },
@@ -246,6 +247,11 @@ export class PathTracer {
     this.pathTracingMaterial.uniforms.tConcreteColor.value = loadTex('/textures/wood051/Wood051_1K-JPG_Color.jpg')
     this.pathTracingMaterial.uniforms.tConcreteNormal.value = loadTex('/textures/wood051/Wood051_1K-JPG_NormalGL.jpg')
     this.pathTracingMaterial.uniforms.tConcreteRoughness.value = loadTex('/textures/wood051/Wood051_1K-JPG_Roughness.jpg')
+
+    // Marble015 for the floor
+    this.pathTracingMaterial.uniforms.tMarbleColor.value = loadTex('/textures/marble015/Marble015_1K-JPG_Color.jpg')
+    this.pathTracingMaterial.uniforms.tMarbleNormal.value = loadTex('/textures/marble015/Marble015_1K-JPG_NormalGL.jpg')
+    this.pathTracingMaterial.uniforms.tMarbleRoughness.value = loadTex('/textures/marble015/Marble015_1K-JPG_Roughness.jpg')
   }
 
   public setWalkPhase(phase: number) {

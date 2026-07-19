@@ -60,12 +60,12 @@ export const useGameStore = create<GameState>()(
 
       settings: {
         renderScale: 1.5,
-        samplesWhileMoving: 4,
-        samplesWhileStill: 24,
+        samplesWhileMoving: 2,
+        samplesWhileStill: 16,
         bounces: 3,
         timeOfDay: 'noon',
         masterVolume: 0.5,
-        denoiserEnabled: true,
+        denoiserEnabled: false,
       },
       updateSettings: (newSettings) => 
         set((state) => ({ settings: { ...state.settings, ...newSettings } })),

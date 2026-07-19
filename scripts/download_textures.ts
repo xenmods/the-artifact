@@ -30,7 +30,7 @@ async function downloadAndExtract(url: string, destPath: string) {
 async function getMaterial(query: string, name: string) {
   console.log(`Searching for ${query}...`)
   // Using v2 API, querying for 1K JPGs
-  const searchUrl = `https://ambientcg.com/api/v2/full_json?type=Material&q=${query}&limit=1`
+  const searchUrl = `https://ambientcg.com/api/v2/full_json?type=Material&id=${query}`
   const data = await fetchJSON(searchUrl)
   
   if (!data.foundAssets || data.foundAssets.length === 0) {
@@ -63,9 +63,7 @@ async function run() {
     Bun.spawnSync(['bun', 'add', '-d', 'unzip-stream', '@types/unzip-stream'])
   }
 
-  await getMaterial('Wood', 'wood')
-  await getMaterial('Metal', 'metal')
-  await getMaterial('Concrete', 'concrete')
+  await getMaterial('Marble015', 'marble015')
   
   console.log('All textures downloaded!')
 }
